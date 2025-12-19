@@ -1,0 +1,148 @@
+import sys
+import os
+import torch
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+
+# Setup Path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path: sys.path.insert(0, project_root)
+
+# Import Core Systems
+from src.core.engine import ModelEngine
+from src.core.memory import MemoryManager
+from src.core.context import ContextResolver
+from src.core.saas_api import SaasAPI
+from src.core.integrations import IntegrationManager
+from src.agents.manager import ManagerAgent
+from src.agents.coder import CoderAgent
+from src.agents.researcher import ResearcherAgent
+from src.agents.vision import VisionAgent
+
+# --- INITIALIZATION (Load Models Once) ---
+print("🚀 Starting Project A Server...")
+try:
+    engine = ModelEngine() # Loads Qwen-14B (Heavy)
+except Exception as e:
+    print(f"CRITICAL ERROR: {e}")
+    engine = None
+
+memory = MemoryManager()
+resolver = ContextResolver(memory)
+saas = SaasAPI()
+integrations = IntegrationManager(memory)
+
+# Initialize Agents
+manager = ManagerAgent(engine, memory)
+coder = CoderAgent(engine, memory)
+researcher = ResearcherAgent(engine)
+vision = VisionAgent()
+
+app = FastAPI(title="Project A API", version="1.0.0")
+
+# --- DATA MODELS ---
+class ChatRequest(BaseModel):
+    user_id: int
+    message: str
+    store_id: Optional[int] = None
+
+class ChatResponse(BaseModel):
+    response: str
+    action_taken: Optional[str] = None
+    data: Optional[dict] = None
+
+# --- ENDPOINTS ---
+
+@app.get("/health")
+def health_check():
+    return {"status": "online", "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"}
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(req: ChatRequest):
+    """
+    Main conversation endpoint.
+    """
+    print(f"📩 Request from User {req.user_id}: {req.message}")
+    
+    # 1. Context Setup
+    # In a real app, you might validate the token here
+    if req.store_id:
+        # Fetch store details directly
+        # For prototype, we simulate the resolver logic manually or assume store_id is valid
+        # Let's simple set db context for now
+        manager.db_context = f"Store ID: {req.store_id} (Context Loaded)"
+    
+    # 2. History
+    memory.add_message("user", req.message)
+    history_str = memory.get_context_string(limit=6)
+
+    # 3. Analyze
+    decision = manager.decide_tool(req.message, history_str)
+    tool_name = decision.get("tool")
+    args = decision.get("args", {})
+    
+    response_text = ""
+    action_type = "chat"
+    meta_data = {}
+
+    # 4. Execute Logic (Simplified from main.py)
+    if tool_name == "technical_planner":
+        action_type = "automation_design"
+        plan = manager.plan(req.message)
+        code = coder.write_code(req.message, plan)
+        
+        # Save internally
+        # Extract JSON (simplified)
+        import re
+        match = re.search(r"```json\n(.*?)\n```", code, re.DOTALL)
+        if match:
+            json_payload = match.group(1)
+            # Save to DB
+            if req.store_id:
+                res = integrations.deploy_internal(req.store_id, json_payload, "API Generated Flow")
+                meta_data = res
+        
+        response_text = f"Đã thiết kế xong quy trình.\n\n{code}"
+
+    elif tool_name:
+        action_type = "tool_use"
+        # Handle Sales/Inventory logic here...
+        # (For brevity, I'll map just one example)
+        if tool_name == "get_sales_report":
+            val = saas.get_sales_report(req.store_id or 1, "today")
+            context = f"SALES: {val}"
+            response_text = manager.consult(req.message, context, history_str)
+        else:
+            # Fallback tool usage
+            response_text = manager.consult(req.message, f"Tool {tool_name} triggered", history_str)
+
+    else:
+        # General Chat
+        response_text = manager.consult(req.message, "", history_str)
+
+    # 5. Save & Return
+    # Clean output
+    response_text = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL).strip()
+    memory.add_message("assistant", response_text)
+    
+    return {
+        "response": response_text,
+        "action_taken": action_type,
+        "data": meta_data
+    }
+
+@app.post("/upload_image")
+async def upload_image(user_id: int, file: UploadFile = File(...)):
+    """
+    Endpoint to handle image uploads for Vision analysis.
+    """
+    file_location = f"src/data/{file.filename}"
+    with open(file_location, "wb+") as file_object:
+        file_object.write(file.file.read())
+    
+    # Run Vision
+    result = vision.analyze_image(file_location)
+    
+    return {"filename": file.filename, "analysis": result}

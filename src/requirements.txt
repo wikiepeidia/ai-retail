@@ -1,0 +1,27 @@
+# --- Core AI & LLM ---
+torch
+transformers
+accelerate
+bitsandbytes
+protobuf
+sentencepiece
+
+# --- Vision (Florence-2) ---
+timm
+einops
+flash_attn
+pillow
+
+# --- RAG & Vector Database ---
+chromadb
+sentence-transformers
+
+# --- File Parsers ---
+pypdf
+python-docx
+
+# --- Tools & Utilities ---
+ddgs
+lunardate
+pytz
+fastapi
