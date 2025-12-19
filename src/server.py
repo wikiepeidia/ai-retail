@@ -38,9 +38,11 @@ integrations = IntegrationManager(memory)
 manager = ManagerAgent(engine, memory)
 coder = CoderAgent(engine, memory)
 researcher = ResearcherAgent(engine)
-SKIP_VISION = os.environ.get("SKIP_VISION", "0") in ["1", "true", "True"]
-if SKIP_VISION:
-    print("⚠️ Vision explicitly disabled via SKIP_VISION env")
+
+# Vision is OFF by default to avoid slow/fragile loads. Opt-in with ENABLE_VISION=1.
+ENABLE_VISION = os.environ.get("ENABLE_VISION", "0") in ["1", "true", "True"]
+if not ENABLE_VISION:
+    print("⚠️ Vision disabled by default (set ENABLE_VISION=1 to load Florence)")
     vision = None
     vision_enabled = False
 else:
