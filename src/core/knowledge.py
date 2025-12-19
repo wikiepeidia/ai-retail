@@ -9,30 +9,26 @@ import docx
 
 class KnowledgeBase:
     def __init__(self, persist_dir="./data/vector_db", doc_dir="./src/data/docs"):
-        print("📚 [RAG] Initializing Knowledge Base 2.0 (Re-Ranker Enabled)...")
+        print("📚 [RAG] Initializing Knowledge Base 2.5 (Verbose Mode)...")
         
         self.doc_dir = doc_dir
         
-        # 1. Bi-Encoder (The Librarian) - Fast Retrieval
-        # Runs on CPU to save VRAM for Qwen
+        # Models
         self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
-        
-        # 2. Cross-Encoder (The Professor) - Deep Re-ranking
-        # This is a small model, safe to run on CPU or GPU
         self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device='cpu')
         
-        # 3. Vector DB
+        # DB Setup
         os.makedirs(persist_dir, exist_ok=True)
         os.makedirs(doc_dir, exist_ok=True)
         
         self.client = chromadb.PersistentClient(path=persist_dir)
         self.collection = self.client.get_or_create_collection(name="project_a_docs")
         
-        # Auto-ingest on startup
+        # Run Ingestion
         self.ingest_folder()
 
     def ingest_folder(self):
-        """Scans src/data/docs and ingests new files."""
+        """Scans folder and ingests files with detailed logging."""
         files = glob.glob(os.path.join(self.doc_dir, "*.*"))
         
         print(f"📂 [RAG] Scanning {self.doc_dir}... Found {len(files)} files.")
@@ -40,33 +36,46 @@ class KnowledgeBase:
         for file_path in files:
             filename = os.path.basename(file_path)
             
-            # Simple deduplication check by source name
+            # 1. Check DB for duplicates
             existing = self.collection.get(where={"source": filename})
             if existing['ids']:
-                continue # Skip if already ingested
+                print(f"   ℹ️  [Cache] Already in DB: {filename}")
+                continue 
 
+            # 2. Extract Text based on Extension (Case Insensitive)
             text = ""
+            ext = os.path.splitext(filename)[1].lower()
+            
             try:
-                if filename.endswith(".pdf"):
+                if ext == ".pdf":
                     reader = PdfReader(file_path)
-                    text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                elif filename.endswith(".docx"):
+                    text = "\n".join([page.extract_text() or "" for page in reader.pages])
+                    
+                elif ext == ".docx":
                     doc = docx.Document(file_path)
                     text = "\n".join([para.text for para in doc.paragraphs])
-                elif filename.endswith(".txt") or filename.endswith(".md"):
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    
+                elif ext in [".txt", ".md", ".json", ".py"]:
+                    with open(file_path, "r", encoding="utf-8", errors='ignore') as f:
                         text = f.read()
                 
-                if text:
+                else:
+                    print(f"   ⚠️  Unsupported Format: {filename} ({ext})")
+                    continue
+                
+                # 3. Save if text found
+                if text.strip():
                     self.add_document(text, source=filename)
                     print(f"   ✅ Learned: {filename}")
+                else:
+                    print(f"   ⚠️  Empty File (No selectable text): {filename}")
+                    
             except Exception as e:
                 print(f"   ❌ Error reading {filename}: {e}")
 
     def add_document(self, text: str, source: str = "manual_entry"):
-        # Chunking strategy: Overlapping windows for better context
-        chunk_size = 500
-        overlap = 50
+        chunk_size = 800 # Increased chunk size for better context
+        overlap = 100
         
         raw_chunks = []
         start = 0
@@ -89,37 +98,17 @@ class KnowledgeBase:
         )
 
     def search(self, query: str, top_k=3):
-        """
-        2-Stage Retrieval:
-        1. Vector Search: Get top 10 candidates.
-        2. Re-Ranking: Score candidates against query.
-        3. Return top_k best matches.
-        """
-        # Stage 1: Retrieval (Recall)
         query_vec = self.embedder.encode([query]).tolist()
-        results = self.collection.query(
-            query_embeddings=query_vec,
-            n_results=10 # Fetch more than we need
-        )
+        results = self.collection.query(query_embeddings=query_vec, n_results=10)
         
         candidates = results['documents'][0]
         if not candidates: return None
         
-        # Stage 2: Re-Ranking (Precision)
-        # Prepare pairs: [ [query, doc1], [query, doc2] ... ]
+        # Re-Ranking
         pairs = [[query, doc] for doc in candidates]
         scores = self.reranker.predict(pairs)
+        scored_docs = sorted(list(zip(candidates, scores)), key=lambda x: x[1], reverse=True)
         
-        # Combine docs with scores
-        scored_docs = list(zip(candidates, scores))
-        
-        # Sort by score descending (Highest relevance first)
-        scored_docs.sort(key=lambda x: x[1], reverse=True)
-        
-        # Filter: Keep only high confidence (Score > 0)
-        # And take top K
+        # Return top K with Score > 0
         final_docs = [doc for doc, score in scored_docs if score > 0][:top_k]
-        
-        if not final_docs: return None
-        
-        return "\n---\n".join(final_docs)
+        return "\n---\n".join(final_docs) if final_docs else None
