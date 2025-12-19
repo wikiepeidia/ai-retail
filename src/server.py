@@ -1,7 +1,7 @@
 import sys
 import os
 import torch
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 
@@ -40,6 +40,9 @@ coder = CoderAgent(engine, memory)
 researcher = ResearcherAgent(engine)
 vision = VisionAgent()
 
+# Shared key to protect /plan endpoint (set AI_SHARED_KEY env in Colab)
+AI_SHARED_KEY = os.environ.get("AI_SHARED_KEY", "")
+
 app = FastAPI(title="Project A API", version="1.0.0")
 
 # --- DATA MODELS ---
@@ -53,11 +56,44 @@ class ChatResponse(BaseModel):
     action_taken: Optional[str] = None
     data: Optional[dict] = None
 
+class PlanRequest(BaseModel):
+    prompt: str
+    context: Optional[dict] = None
+
+class PlanResponse(BaseModel):
+    nodes: list
+    edges: list
+    notes: Optional[str] = None
+
 # --- ENDPOINTS ---
 
 @app.get("/health")
 def health_check():
     return {"status": "online", "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"}
+
+
+@app.post("/plan", response_model=PlanResponse)
+async def plan_endpoint(req: PlanRequest, x_ai_key: Optional[str] = Header(default=None)):
+    """Generate a simple workflow plan from natural language.
+
+    Security: requires header X-AI-Key matching AI_SHARED_KEY env.
+    """
+    if AI_SHARED_KEY and x_ai_key != AI_SHARED_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    prompt = req.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt required")
+
+    # Minimal deterministic demo plan; swap in agent logic as needed
+    nodes = [
+        {"id": "n1", "type": "google_sheet_read", "config": {"sheetId": "SHEET_ID", "range": "A1:C10"}},
+        {"id": "n2", "type": "google_doc_write", "config": {"docId": "DOC_ID", "template": "Summary: {{n1.data}}"}},
+    ]
+    edges = [{"from": "n1", "to": "n2"}]
+    notes = "demo plan from prompt: " + prompt
+
+    return {"nodes": nodes, "edges": edges, "notes": notes}
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
