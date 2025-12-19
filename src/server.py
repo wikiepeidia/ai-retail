@@ -60,6 +60,16 @@ AI_SHARED_KEY = os.environ.get("AI_SHARED_KEY", "")
 
 app = FastAPI(title="Project A API", version="1.0.0")
 
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "message": "Project A API",
+        "endpoints": ["/health", "/chat", "/plan", "/upload_image"],
+        "vision_enabled": vision_enabled,
+    }
+
 # --- DATA MODELS ---
 class ChatRequest(BaseModel):
     user_id: int
@@ -230,4 +240,5 @@ if __name__ == "__main__":
     maybe_start_ngrok(port)
 
     import uvicorn
-    uvicorn.run("src.server:app", host="0.0.0.0", port=port, reload=False)
+    # Pass app object directly to avoid a second import that re-triggers model loading
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
