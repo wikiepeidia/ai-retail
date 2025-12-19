@@ -38,14 +38,20 @@ integrations = IntegrationManager(memory)
 manager = ManagerAgent(engine, memory)
 coder = CoderAgent(engine, memory)
 researcher = ResearcherAgent(engine)
-try:
-    # Vision model is heavy; make it optional
-    vision = VisionAgent()
-    vision_enabled = True
-except Exception as e:
-    print(f"⚠️ Vision init failed, disabling vision: {e}")
+SKIP_VISION = os.environ.get("SKIP_VISION", "0") in ["1", "true", "True"]
+if SKIP_VISION:
+    print("⚠️ Vision explicitly disabled via SKIP_VISION env")
     vision = None
     vision_enabled = False
+else:
+    try:
+        # Vision model is heavy; make it optional
+        vision = VisionAgent()
+        vision_enabled = True
+    except Exception as e:
+        print(f"⚠️ Vision init failed, disabling vision: {e}")
+        vision = None
+        vision_enabled = False
 
 # Shared key to protect /plan endpoint (set AI_SHARED_KEY env in Colab)
 AI_SHARED_KEY = os.environ.get("AI_SHARED_KEY", "")
