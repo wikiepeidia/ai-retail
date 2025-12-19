@@ -139,45 +139,39 @@ async def chat_endpoint(req: ChatRequest):
     memory.add_message("user", req.message)
     history_str = memory.get_context_string(limit=6)
 
-    # 3. Analyze
-    decision = manager.decide_tool(req.message, history_str)
-    tool_name = decision.get("tool")
-    args = decision.get("args", {})
-    
+    # 3. Analyze (reuse main.py categories)
+    analysis = manager.analyze_task(req.message, history_str)
+    category = analysis.get("category", "GENERAL")
+
     response_text = ""
     action_type = "chat"
     meta_data = {}
 
     # 4. Execute Logic (Simplified from main.py)
-    if tool_name == "technical_planner":
+    if category == "TECHNICAL":
         action_type = "automation_design"
-        plan = manager.plan(req.message)
+        plan = manager.plan(req.message, history_str)
         code = coder.write_code(req.message, plan)
-        
-        # Save internally
-        # Extract JSON (simplified)
+
         import re
         match = re.search(r"```json\n(.*?)\n```", code, re.DOTALL)
         if match:
             json_payload = match.group(1)
-            # Save to DB
             if req.store_id:
                 res = integrations.deploy_internal(req.store_id, json_payload, "API Generated Flow")
                 meta_data = res
-        
+
         response_text = f"Đã thiết kế xong quy trình.\n\n{code}"
 
-    elif tool_name:
-        action_type = "tool_use"
-        # Handle Sales/Inventory logic here...
-        # (For brevity, I'll map just one example)
-        if tool_name == "get_sales_report":
-            val = saas.get_sales_report(req.store_id or 1, "today")
-            context = f"SALES: {val}"
-            response_text = manager.consult(req.message, context, history_str)
-        else:
-            # Fallback tool usage
-            response_text = manager.consult(req.message, f"Tool {tool_name} triggered", history_str)
+    elif category == "MARKETING":
+        action_type = "marketing"
+        response_text = manager.write_marketing(req.message)
+
+    elif category == "DATA_INTERNAL":
+        action_type = "data_lookup"
+        val = saas.get_sales_report(req.store_id or 1, "today")
+        context = f"SALES: {val}"
+        response_text = manager.consult(req.message, context, history_str)
 
     else:
         # General Chat
