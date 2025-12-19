@@ -38,7 +38,14 @@ integrations = IntegrationManager(memory)
 manager = ManagerAgent(engine, memory)
 coder = CoderAgent(engine, memory)
 researcher = ResearcherAgent(engine)
-vision = VisionAgent()
+try:
+    # Vision model is heavy; make it optional
+    vision = VisionAgent()
+    vision_enabled = True
+except Exception as e:
+    print(f"⚠️ Vision init failed, disabling vision: {e}")
+    vision = None
+    vision_enabled = False
 
 # Shared key to protect /plan endpoint (set AI_SHARED_KEY env in Colab)
 AI_SHARED_KEY = os.environ.get("AI_SHARED_KEY", "")
@@ -173,7 +180,11 @@ async def chat_endpoint(req: ChatRequest):
 async def upload_image(user_id: int, file: UploadFile = File(...)):
     """
     Endpoint to handle image uploads for Vision analysis.
+    If vision model failed to load, return a clear error.
     """
+    if not vision_enabled or vision is None:
+        raise HTTPException(status_code=503, detail="Vision model not available")
+
     file_location = f"src/data/{file.filename}"
     with open(file_location, "wb+") as file_object:
         file_object.write(file.file.read())
