@@ -153,8 +153,6 @@ async def chat_endpoint(req: ChatRequest):
         action_type = "automation_design"
         plan = manager.plan(req.message, history_str)
         code = coder.write_code(req.message, plan)
-
-        import re
         match = re.search(r"```json\n(.*?)\n```", code, re.DOTALL)
         if match:
             json_payload = match.group(1)
