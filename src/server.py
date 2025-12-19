@@ -201,3 +201,33 @@ async def upload_image(user_id: int, file: UploadFile = File(...)):
     result = vision.analyze_image(file_location)
     
     return {"filename": file.filename, "analysis": result}
+
+
+# --- LOCAL/NOTEBOOK ENTRYPOINT ---
+def maybe_start_ngrok(port: int):
+    """Optionally start an ngrok tunnel when AUTO_NGROK=1 and pyngrok is available."""
+    auto = os.environ.get("AUTO_NGROK", "0") in ["1", "true", "True"]
+    if not auto:
+        return None
+
+    try:
+        from pyngrok import ngrok
+    except ImportError:
+        print("⚠️ AUTO_NGROK requested but pyngrok is not installed. Run: pip install pyngrok")
+        return None
+
+    token = os.environ.get("NGROK_AUTHTOKEN")
+    if token:
+        ngrok.set_auth_token(token)
+
+    tunnel = ngrok.connect(port, bind_tls=True)
+    print(f"🌐 ngrok tunnel started: {tunnel.public_url}")
+    return tunnel.public_url
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    maybe_start_ngrok(port)
+
+    import uvicorn
+    uvicorn.run("src.server:app", host="0.0.0.0", port=port, reload=False)
